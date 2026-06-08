@@ -1,0 +1,5 @@
+# Copy to .dev.vars and fill in from your Google Cloud OAuth client.
+# .dev.vars is gitignored.
+GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET="your-client-secret"
+GOOGLE_REDIRECT_URI="http://localhost:5173/api/auth/google/callback"

@@ -1,0 +1,44 @@
+{
+  "name": "remember",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "deploy": "npm run build && wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b --noEmit",
+    "cf-typegen": "wrangler types",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply remember --local",
+    "db:migrate:remote": "wrangler d1 migrations apply remember --remote"
+  },
+  "dependencies": {
+    "@oslojs/crypto": "^1.0.1",
+    "@oslojs/encoding": "^1.1.0",
+    "@tanstack/react-query": "^5.101.0",
+    "arctic": "^3.7.0",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.23",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "rrule": "^2.8.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.40.0",
+    "@cloudflare/vitest-pool-workers": "^0.8.71",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "@vitest/runner": "~3.2.0",
+    "@vitest/snapshot": "~3.2.0",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "vitest": "~3.2.0",
+    "wrangler": "^4.98.0"
+  }
+}
