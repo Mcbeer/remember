@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react";
+import { X } from "lucide-react";
 import type { Family, List } from "../api.ts";
-import {
-  useCreateList,
-  useDeleteList,
-  useCreateFamily,
-} from "../hooks.ts";
+import { useCreateList, useDeleteList, useCreateFamily } from "../hooks.ts";
+import { Button } from "@/components/ui/button.tsx";
+import { Input } from "@/components/ui/input.tsx";
 import { FamilySection } from "./FamilySection.tsx";
 
 export function Sidebar({
@@ -53,8 +52,10 @@ export function Sidebar({
   }
 
   return (
-    <aside className="sidebar">
-      {loading && <div className="muted">Loading…</div>}
+    <div className="flex h-full flex-col gap-1 overflow-y-auto p-3">
+      {loading && (
+        <div className="px-1 text-sm text-muted-foreground">Loading…</div>
+      )}
 
       {/* Personal */}
       <Section title="Personal">
@@ -80,10 +81,15 @@ export function Sidebar({
         />
       ))}
 
-      <button className="btn add-family" onClick={addFamily}>
+      <Button
+        variant="outline"
+        size="sm"
+        className="mt-auto w-full"
+        onClick={addFamily}
+      >
         + New family
-      </button>
-    </aside>
+      </Button>
+    </div>
   );
 }
 
@@ -95,8 +101,16 @@ export function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="section">
-      <div className="sidebar-label">{title}</div>
+    <div className="mb-4">
+      <SectionLabel>{title}</SectionLabel>
+      {children}
+    </div>
+  );
+}
+
+export function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
       {children}
     </div>
   );
@@ -113,27 +127,35 @@ export function ListNav({
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  if (lists.length === 0) return <p className="muted empty">No lists yet.</p>;
+  if (lists.length === 0)
+    return (
+      <p className="my-1 text-sm text-muted-foreground">No lists yet.</p>
+    );
   return (
-    <ul className="list-nav">
+    <ul className="flex flex-col gap-0.5">
       {lists.map((l) => (
         <li
           key={l.id}
           className={
-            l.id === selectedId ? "list-nav-item active" : "list-nav-item"
+            "group flex items-center rounded-md " +
+            (l.id === selectedId ? "bg-accent" : "hover:bg-accent/50")
           }
         >
-          <button className="list-nav-btn" onClick={() => onSelect(l.id)}>
+          <button
+            className="min-w-0 flex-1 truncate px-3 py-2 text-left text-sm"
+            onClick={() => onSelect(l.id)}
+          >
             {l.name}
           </button>
           <button
-            className="icon-btn"
+            className="shrink-0 rounded-md p-2 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
             title="Delete list"
+            aria-label={`Delete ${l.name}`}
             onClick={() => {
               if (confirm(`Delete "${l.name}" and its items?`)) onDelete(l.id);
             }}
           >
-            ×
+            <X className="size-4" />
           </button>
         </li>
       ))}
@@ -145,20 +167,23 @@ export function AddListForm({ onAdd }: { onAdd: (name: string) => void }) {
   const [name, setName] = useState("");
   return (
     <form
-      className="add-list"
+      className="mt-2 flex gap-2"
       onSubmit={(e) => {
         e.preventDefault();
         onAdd(name);
         setName("");
       }}
     >
-      <input
+      <Input
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="New list…"
         aria-label="New list name"
+        className="h-9"
       />
-      <button className="btn">Add</button>
+      <Button type="submit" size="sm" variant="secondary">
+        Add
+      </Button>
     </form>
   );
 }

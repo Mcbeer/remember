@@ -1,7 +1,10 @@
 import { useState } from "react";
+import { Share2, LogOut } from "lucide-react";
 import type { Family, List } from "../api.ts";
 import { useGenerateInvite, useLeaveFamily } from "../hooks.ts";
-import { ListNav, AddListForm } from "./Sidebar.tsx";
+import { Button } from "@/components/ui/button.tsx";
+import { Input } from "@/components/ui/input.tsx";
+import { ListNav, AddListForm, SectionLabel } from "./Sidebar.tsx";
 
 export function FamilySection({
   family,
@@ -47,28 +50,50 @@ export function FamilySection({
   }
 
   return (
-    <div className="section">
-      <div className="family-header">
-        <span className="sidebar-label">{family.name}</span>
-        <div className="family-actions">
-          <button className="icon-btn" title="Invite link" onClick={invite}>
-            ↗
-          </button>
-          <button className="icon-btn" title="Leave family" onClick={leave}>
-            ⎋
-          </button>
+    <div className="mb-4">
+      <div className="flex items-center justify-between">
+        <SectionLabel>{family.name}</SectionLabel>
+        <div className="flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title="Invite link"
+            aria-label="Create invite link"
+            onClick={invite}
+          >
+            <Share2 className="size-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title="Leave family"
+            aria-label="Leave family"
+            onClick={leave}
+          >
+            <LogOut className="size-4" />
+          </Button>
         </div>
       </div>
 
       {inviteLink && (
-        <div className="invite-box">
-          <div className="muted small">
+        <div className="my-2 flex flex-col gap-2 rounded-md border border-border bg-accent/40 p-2.5">
+          <div className="text-xs text-muted-foreground">
             {copied ? "Link copied — " : ""}share to invite (expires in 7 days):
           </div>
-          <input readOnly value={inviteLink} onFocus={(e) => e.target.select()} />
-          <button className="btn small" onClick={invite}>
+          <Input
+            readOnly
+            value={inviteLink}
+            onFocus={(e) => e.target.select()}
+            className="h-8 text-xs"
+          />
+          <Button
+            variant="secondary"
+            size="sm"
+            className="self-start"
+            onClick={invite}
+          >
             Regenerate
-          </button>
+          </Button>
         </div>
       )}
 

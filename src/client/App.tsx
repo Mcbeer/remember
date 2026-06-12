@@ -20,7 +20,11 @@ export function App() {
   const secret = joinSecret();
 
   if (me.isLoading) {
-    return <div className="centered muted">Loading…</div>;
+    return (
+      <div className="grid min-h-full place-items-center text-muted-foreground">
+        Loading…
+      </div>
+    );
   }
 
   const notLoggedIn =

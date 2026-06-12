@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAcceptInvite } from "../hooks.ts";
+import { Button } from "@/components/ui/button.tsx";
 
 // Handles /join/:secret. The User must be logged in (App guarantees this before
 // rendering Join); on accept we send them to the app.
@@ -31,25 +32,25 @@ export function Join({ secret }: { secret: string }) {
   }
 
   return (
-    <div className="centered">
-      <div className="login-card">
-        <h1>Join family</h1>
+    <div className="grid min-h-full place-items-center p-4">
+      <div className="w-full max-w-sm rounded-xl border border-border bg-card p-8 text-center shadow-sm">
+        <h1 className="text-xl font-semibold tracking-tight">Join family</h1>
         {error ? (
           <>
-            <p className="muted">{error}</p>
-            <button className="btn" onClick={goHome}>
+            <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+            <Button variant="outline" className="mt-6 w-full" onClick={goHome}>
               Go to app
-            </button>
+            </Button>
           </>
         ) : done ? (
           <>
-            <p className="muted">You're in!</p>
-            <button className="btn btn-primary" onClick={goHome}>
+            <p className="mt-2 text-sm text-muted-foreground">You're in!</p>
+            <Button className="mt-6 w-full" onClick={goHome}>
               Open app
-            </button>
+            </Button>
           </>
         ) : (
-          <p className="muted">Joining…</p>
+          <p className="mt-2 text-sm text-muted-foreground">Joining…</p>
         )}
       </div>
     </div>

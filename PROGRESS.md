@@ -78,7 +78,13 @@ migrations/             # 0000_core_schema, 0001_add_sessions
   cascades). Sidebar grouped Personal / per-Family with invite & leave UI.
 - **Schedules/Occurrences** (ADR-0004): RRULE via `rrule`, occurrences computed
   per window and merged with persisted rows, complete/skip upserts (and deletes
-  the row when state clears). UI: daily/weekly-by-weekday presets + tick/skip.
+  the row when state clears). UI: a single add-entry form with a "repeats"
+  toggle (revealing daily/weekly-by-weekday + time) creates a Schedule rather
+  than an Item; recurring entries render **inline** in the one list showing only
+  their **next** Occurrence (tick = complete that Occurrence, skip, or delete the
+  Schedule). The model keeps Item and Schedule distinct (ADR-0004) — only the
+  UI is unified. The standalone `SchedulesSection`/`ScheduleOccurrences`
+  components were removed in the redesign (ADR-0009).
 
 ## Not yet built (backlog, roughly prioritized)
 
@@ -103,6 +109,19 @@ migrations/             # 0000_core_schema, 0001_add_sessions
    also host reminder alarms. D1 schema unaffected.
 5. **PWA installability** (CONTEXT: installable shell, online data). Manifest +
    service worker for install; no offline data sync in v1.
+6. **UI redesign + mobile support** (ADR-0009). Replace the hand-rolled
+   `src/client/styles.css` (one `--accent` blue, fixed 260px sidebar, no
+   breakpoints — unusable on phones, likely the primary client). Decided:
+   **Tailwind v4** (`@tailwindcss/vite`, CSS-first config) + **selective
+   shadcn** components (Button, Input, Checkbox, Dialog, Sheet, ...), **dark
+   palette in `:root`** (no toggle, `prefers-color-scheme` ignored; light
+   deferred), **big-bang** migration. Needs:
+   - install Tailwind v4 + `@tailwindcss/vite`, shadcn init, dark-first tokens
+   - responsive layout: sidebar collapses to a Sheet drawer on mobile, content
+     full-width; touch-friendly hit targets for item toggle/edit/delete
+   - convert all 8 components (Login, Home, Sidebar, FamilySection, ItemsPanel,
+     SchedulesSection, ScheduleOccurrences, Join) in one pass, then delete
+     `styles.css`. Pairs naturally with item 5 (PWA shell).
 
 ## Known gaps / tech debt
 

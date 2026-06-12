@@ -1,5 +1,6 @@
 import {
   useQuery,
+  useQueries,
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -10,6 +11,7 @@ import {
   type List,
   type Family,
   type Due,
+  type Occurrence,
 } from "./api.ts";
 
 // Current User. 401 (not logged in) is a normal state, not an error to retry.
@@ -180,6 +182,27 @@ export function useOccurrences(scheduleId: string) {
     queryKey: ["occurrences", scheduleId],
     queryFn: () => api.schedules.occurrences(scheduleId),
   });
+}
+
+// Fetch occurrences for many Schedules at once and report each Schedule's next
+// relevant Occurrence (first un-skipped, else first). Used to merge recurring
+// entries date-wise into the one list without each row self-fetching.
+export function useScheduleNextOccurrences(scheduleIds: string[]) {
+  const results = useQueries({
+    queries: scheduleIds.map((id) => ({
+      queryKey: ["occurrences", id],
+      queryFn: () => api.schedules.occurrences(id),
+    })),
+  });
+
+  const byScheduleId: Record<string, Occurrence | undefined> = {};
+  scheduleIds.forEach((id, i) => {
+    const rows = results[i]?.data ?? [];
+    byScheduleId[id] = rows.find((o) => !o.skipped) ?? rows[0];
+  });
+
+  const isLoading = results.some((r) => r.isLoading);
+  return { byScheduleId, isLoading };
 }
 
 export function useSetOccurrence(scheduleId: string) {
