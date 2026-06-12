@@ -85,6 +85,12 @@ migrations/             # 0000_core_schema, 0001_add_sessions
   Schedule). The model keeps Item and Schedule distinct (ADR-0004) — only the
   UI is unified. The standalone `SchedulesSection`/`ScheduleOccurrences`
   components were removed in the redesign (ADR-0009).
+- **UI / design** (ADR-0009): Tailwind v4 (`@tailwindcss/vite`, CSS-first) +
+  selectively-added shadcn components (`src/client/components/ui/`: Button,
+  Input, Checkbox, Dialog, Sheet, Label) + `lib/utils.ts`. Dark-first tokens
+  (dark slate in `:root`, no toggle, light deferred). Responsive: sidebar
+  collapses to a Sheet drawer on mobile. Due dates set via a calendar-icon
+  button that opens the native picker (`showPicker()`), no manual typing.
 
 ## Not yet built (backlog, roughly prioritized)
 
@@ -108,20 +114,10 @@ migrations/             # 0000_core_schema, 0001_add_sessions
 4. **Real-time updates** (deferred). DO-per-Family fronting WebSockets; would
    also host reminder alarms. D1 schema unaffected.
 5. **PWA installability** (CONTEXT: installable shell, online data). Manifest +
-   service worker for install; no offline data sync in v1.
-6. **UI redesign + mobile support** (ADR-0009). Replace the hand-rolled
-   `src/client/styles.css` (one `--accent` blue, fixed 260px sidebar, no
-   breakpoints — unusable on phones, likely the primary client). Decided:
-   **Tailwind v4** (`@tailwindcss/vite`, CSS-first config) + **selective
-   shadcn** components (Button, Input, Checkbox, Dialog, Sheet, ...), **dark
-   palette in `:root`** (no toggle, `prefers-color-scheme` ignored; light
-   deferred), **big-bang** migration. Needs:
-   - install Tailwind v4 + `@tailwindcss/vite`, shadcn init, dark-first tokens
-   - responsive layout: sidebar collapses to a Sheet drawer on mobile, content
-     full-width; touch-friendly hit targets for item toggle/edit/delete
-   - convert all 8 components (Login, Home, Sidebar, FamilySection, ItemsPanel,
-     SchedulesSection, ScheduleOccurrences, Join) in one pass, then delete
-     `styles.css`. Pairs naturally with item 5 (PWA shell).
+   service worker for install; no offline data sync in v1. The dark-first UI
+   (ADR-0009) is now in place, so this is the natural next step. A light theme
+   is also deferred — when added, give it a `.light` block + wire
+   `prefers-color-scheme`/a toggle (ADR-0009).
 
 ## Known gaps / tech debt
 
@@ -130,13 +126,15 @@ migrations/             # 0000_core_schema, 0001_add_sessions
   verified.
 - **Occurrence one-off edits**: schema has `override_title`/`override_at`, repo
   only wires complete/skip. No override-title/reschedule yet.
-- **Occurrence window**: server defaults to next 60 days; UI shows next 5. No
-  past-occurrence view or pagination.
+- **Occurrence window**: server defaults to next 60 days; UI shows only the
+  next 1 (per recurring entry). No past-occurrence view or pagination.
 - **Timezone in recurrence**: Schedule stores an IANA tz but expansion uses the
   absolute UTC instant. Fine for v1; true tz-aware recurrence across DST would
   need rrule's tz handling.
 - **No member-list UI**: you can see a Family's lists but not who's in it.
 - **`.dev.vars` is copied into `dist/` by the vite plugin** (for `vite preview`).
   `dist/` is gitignored so no leak, but never deploy `dist/` contents directly.
-- **Repo not under git yet** — initialize before deploying.
+- **Git**: under version control on `main`, pushed to public remote
+  `git@github.com:Mcbeer/remember.git`. Repo is public — keep secrets out
+  (`.dev.vars` is gitignored).
 ```
