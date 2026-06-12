@@ -25,6 +25,14 @@ export type Family = {
 
 export type Invite = { secret: string; expiresAt: string };
 
+export type FamilyMember = {
+  userId: string;
+  name: string | null;
+  email: string;
+  avatarUrl: string | null;
+  joinedAt: string;
+};
+
 // A due moment: a UTC instant plus the IANA timezone it was entered in.
 export type Due = { at: string; timezone: string };
 
@@ -57,10 +65,21 @@ export type Schedule = {
 
 export type Occurrence = {
   scheduleId: string;
-  occurrenceAt: string;
-  title: string;
+  occurrenceAt: string; // canonical instant from the rule (its identity)
+  title: string; // override title, else the Schedule's title
   completed: boolean;
   skipped: boolean;
+  overrideAt: string | null; // rescheduled-to instant, or null if on schedule
+};
+
+// One-off edits to a single Occurrence. completed/skipped are plain flags;
+// overrideTitle/overrideAt are tri-state — omit to leave unchanged, null to
+// clear back to the Schedule's default.
+export type OccurrenceState = {
+  completed?: boolean;
+  skipped?: boolean;
+  overrideTitle?: string | null;
+  overrideAt?: string | null;
 };
 
 class ApiError extends Error {
@@ -99,6 +118,8 @@ export const api = {
 
   families: {
     list: () => request<Family[]>("/api/families"),
+    members: (familyId: string) =>
+      request<FamilyMember[]>(`/api/families/${familyId}/members`),
     create: (name: string) =>
       request<Family>("/api/families", {
         method: "POST",
@@ -184,7 +205,7 @@ export const api = {
     setOccurrence: (
       scheduleId: string,
       occurrenceAt: string,
-      state: { completed?: boolean; skipped?: boolean },
+      state: OccurrenceState,
     ) =>
       request<Occurrence>(`/api/schedules/${scheduleId}/occurrences`, {
         method: "POST",

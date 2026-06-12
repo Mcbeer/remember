@@ -58,7 +58,7 @@ src/client/
   App.tsx, main.tsx, styles.css
   components/           # Login, Home, Sidebar, FamilySection, ItemsPanel,
                         # SchedulesSection, ScheduleOccurrences, Join
-test/                   # visibility, auth, families, schedules (40 tests)
+  test/                   # visibility, auth, families, schedules, api (82 tests)
 migrations/             # 0000_core_schema, 0001_add_sessions
 ```
 
@@ -76,15 +76,24 @@ migrations/             # 0000_core_schema, 0001_add_sessions
 - **Families & sharing**: create family, reusable 7-day invite (regenerate
   replaces), join via `/join/:secret`, leave (last member deletes family +
   cascades). Sidebar grouped Personal / per-Family with invite & leave UI.
+  Member-list: a roster toggle per Family (`GET /api/families/:id/members`,
+  member-gated → 403 for outsiders) shows each Member's name/avatar inline.
+  Invite UI is a toggle: first open mints + copies one link, reopening reuses
+  it, and a "Regenerate" button mints a fresh secret on demand (not on every
+  click).
 - **Schedules/Occurrences** (ADR-0004): RRULE via `rrule`, occurrences computed
   per window and merged with persisted rows, complete/skip upserts (and deletes
   the row when state clears). UI: a single add-entry form with a "repeats"
   toggle (revealing daily/weekly-by-weekday + time) creates a Schedule rather
   than an Item; recurring entries render **inline** in the one list showing only
-  their **next** Occurrence (tick = complete that Occurrence, skip, or delete the
-  Schedule). The model keeps Item and Schedule distinct (ADR-0004) — only the
-  UI is unified. The standalone `SchedulesSection`/`ScheduleOccurrences`
-  components were removed in the redesign (ADR-0009).
+  their **next** Occurrence (tick = complete that Occurrence, skip, edit, or
+  delete the Schedule). One-off edits: a single Occurrence can be retitled
+  (`overrideTitle`) or rescheduled (`overrideAt`) without changing the rule —
+  the row's identity stays its canonical rule instant; `overrideAt` is the
+  moved-to time. Clearing every flag/override deletes the row (computed-only).
+  The model keeps Item and Schedule distinct (ADR-0004) — only the UI is
+  unified. The standalone `SchedulesSection`/`ScheduleOccurrences` components
+  were removed in the redesign (ADR-0009).
 - **UI / design** (ADR-0009): Tailwind v4 (`@tailwindcss/vite`, CSS-first) +
   selectively-added shadcn components (`src/client/components/ui/`: Button,
   Input, Checkbox, Dialog, Sheet, Label) + `lib/utils.ts`. Dark-first tokens
@@ -121,17 +130,17 @@ migrations/             # 0000_core_schema, 0001_add_sessions
 
 ## Known gaps / tech debt
 
-- **No API-route tests** — repos + auth are well tested; the Hono routers are
-  thin wrappers and untested. The `returnTo`/login-resume flow is only manually
-  verified.
-- **Occurrence one-off edits**: schema has `override_title`/`override_at`, repo
-  only wires complete/skip. No override-title/reschedule yet.
+- **API-route tests**: the routers are now covered end-to-end (auth gating,
+  status codes, visibility/membership) in `test/api.test.ts` by driving
+  `app.request(..., env)` with a real session cookie — families/invites/members,
+  lists, items, and schedules (list/create/delete + occurrence one-off edits).
+  Still untested: the `returnTo`/login-resume flow and the OAuth callback leg
+  (both manual).
 - **Occurrence window**: server defaults to next 60 days; UI shows only the
   next 1 (per recurring entry). No past-occurrence view or pagination.
 - **Timezone in recurrence**: Schedule stores an IANA tz but expansion uses the
   absolute UTC instant. Fine for v1; true tz-aware recurrence across DST would
   need rrule's tz handling.
-- **No member-list UI**: you can see a Family's lists but not who's in it.
 - **`.dev.vars` is copied into `dist/` by the vite plugin** (for `vite preview`).
   `dist/` is gitignored so no leak, but never deploy `dist/` contents directly.
 - **Git**: under version control on `main`, pushed to public remote

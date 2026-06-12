@@ -339,7 +339,8 @@ function AddEntryForm({ listId }: { listId: string }) {
 
 // A recurring entry in the list: shows only its NEXT Occurrence. Ticking
 // completes that one Occurrence (it rolls to the next); the recurrence itself
-// is removed via the delete action.
+// is removed via the delete action. A single Occurrence can also be edited
+// one-off — retitled or rescheduled — without touching the rule (ADR-0004).
 function ScheduleRow({
   listId,
   schedule,
@@ -351,6 +352,30 @@ function ScheduleRow({
 }) {
   const setOcc = useSetOccurrence(schedule.id);
   const deleteSchedule = useDeleteSchedule(listId);
+  const [editing, setEditing] = useState(false);
+
+  // The instant this Occurrence actually lands on (override wins); its
+  // identity for addressing is always the canonical rule instant.
+  const effectiveAt = next ? (next.overrideAt ?? next.occurrenceAt) : null;
+  const moved = !!next?.overrideAt;
+
+  if (editing && next) {
+    return (
+      <OccurrenceEditRow
+        schedule={schedule}
+        next={next}
+        pending={setOcc.isPending}
+        onCancel={() => setEditing(false)}
+        onSave={async ({ overrideTitle, overrideAt }) => {
+          await setOcc.mutateAsync({
+            occurrenceAt: next.occurrenceAt,
+            state: { overrideTitle, overrideAt },
+          });
+          setEditing(false);
+        }}
+      />
+    );
+  }
 
   return (
     <li className="group flex items-center gap-3 border-b border-border py-3">
@@ -374,28 +399,48 @@ function ScheduleRow({
           )}
         >
           <Repeat className="size-3.5 shrink-0 text-muted-foreground" />
-          {schedule.title}
+          {next?.title ?? schedule.title}
         </span>
         <span className="text-xs text-muted-foreground">
-          {next ? formatDue(next.occurrenceAt) : describeRule(schedule.rrule)}
+          {effectiveAt ? (
+            <>
+              {formatDue(effectiveAt)}
+              {moved && (
+                <span className="ml-1.5 italic">(moved this time)</span>
+              )}
+            </>
+          ) : (
+            describeRule(schedule.rrule)
+          )}
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
         {next && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            title="Skip this occurrence"
-            aria-label="Skip this occurrence"
-            onClick={() =>
-              setOcc.mutate({
-                occurrenceAt: next.occurrenceAt,
-                state: { skipped: !next.skipped },
-              })
-            }
-          >
-            <SkipForward className="size-4" />
-          </Button>
+          <>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title="Edit this occurrence"
+              aria-label="Edit this occurrence"
+              onClick={() => setEditing(true)}
+            >
+              <Pencil className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title="Skip this occurrence"
+              aria-label="Skip this occurrence"
+              onClick={() =>
+                setOcc.mutate({
+                  occurrenceAt: next.occurrenceAt,
+                  state: { skipped: !next.skipped },
+                })
+              }
+            >
+              <SkipForward className="size-4" />
+            </Button>
+          </>
         )}
         <Button
           variant="ghost"
@@ -411,6 +456,71 @@ function ScheduleRow({
           <X className="size-4" />
         </Button>
       </div>
+    </li>
+  );
+}
+
+// Inline editor for a one-off Occurrence edit. Title defaults to the effective
+// title; the date picker defaults to the effective instant. Saving sends the
+// override values (empty title clears back to the Schedule's title; clearing
+// the date clears the reschedule, returning to the rule's instant).
+function OccurrenceEditRow({
+  schedule,
+  next,
+  pending,
+  onSave,
+  onCancel,
+}: {
+  schedule: Schedule;
+  next: Occurrence;
+  pending: boolean;
+  onSave: (patch: {
+    overrideTitle: string | null;
+    overrideAt: string | null;
+  }) => void;
+  onCancel: () => void;
+}) {
+  const effectiveAt = next.overrideAt ?? next.occurrenceAt;
+  const [title, setTitle] = useState(next.title);
+  const [due, setDue] = useState(dueToLocalInput(effectiveAt));
+
+  function save(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = title.trim();
+    // A title equal to the Schedule's default clears the override.
+    const overrideTitle =
+      !trimmed || trimmed === schedule.title ? null : trimmed;
+    // A date equal to the rule's instant clears the reschedule.
+    const at = due ? (localInputToDue(due)?.at ?? null) : null;
+    const overrideAt = at === next.occurrenceAt ? null : at;
+    onSave({ overrideTitle, overrideAt });
+  }
+
+  return (
+    <li className="border-b border-border py-3">
+      <form className="flex flex-col gap-2" onSubmit={save}>
+        <Input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          aria-label="Occurrence title"
+          autoFocus
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <DatePickerButton
+            value={due}
+            onChange={setDue}
+            label="Reschedule this occurrence"
+          />
+          <div className="ml-auto flex gap-2">
+            <Button type="submit" size="sm" disabled={pending}>
+              Save
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </form>
     </li>
   );
 }

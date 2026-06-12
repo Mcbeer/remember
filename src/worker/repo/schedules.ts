@@ -10,12 +10,16 @@ export type OccurrenceRow = typeof occurrences.$inferSelect;
 
 // A computed Occurrence: the instant plus any persisted state. completed/skipped
 // default false; title falls back to the Schedule's title unless overridden.
+// `occurrenceAt` is always the canonical instant from the rule (its identity for
+// addressing); `overrideAt` is the moved-to instant for a rescheduled
+// Occurrence, or null when it sits on schedule.
 export type ComputedOccurrence = {
   scheduleId: string;
   occurrenceAt: string;
   title: string;
   completed: boolean;
   skipped: boolean;
+  overrideAt: string | null;
 };
 
 // Schedules belong to a List and inherit its visibility (ADR-0002/0004). Every
@@ -144,22 +148,48 @@ export async function listOccurrences(
       title: row?.overrideTitle ?? schedule.title,
       completed: row?.completed === 1,
       skipped: row?.skipped === 1,
+      overrideAt: row?.overrideAt ?? null,
     };
   });
 }
 
+// State to set on a single Occurrence. Each field is tri-state: omitted leaves
+// the current value, while `null`/empty clears an override back to the
+// Schedule's default. `overrideAt` reschedules just this Occurrence to a
+// different instant (the rule slot it belongs to is still its identity).
+export type OccurrenceState = {
+  completed?: boolean;
+  skipped?: boolean;
+  overrideTitle?: string | null;
+  overrideAt?: string | null;
+};
+
+// Normalize an override input: undefined => keep current; ""/whitespace/null =>
+// clear; otherwise the trimmed value.
+function resolveOverride(
+  input: string | null | undefined,
+  current: string | null,
+): string | null {
+  if (input === undefined) return current;
+  if (input === null) return null;
+  const trimmed = input.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
 /**
- * Set completed/skipped state for one Occurrence (identified by its instant),
- * upserting the persisted row (ADR-0004: a row exists only when state is set).
- * If both flags clear, the row is removed to keep storage compact. Returns the
- * resulting state, or null if the Schedule is not visible.
+ * Set state for one Occurrence (identified by its canonical rule instant),
+ * upserting the persisted row (ADR-0004: a row exists only when it carries
+ * state). Handles completed/skipped flags and the one-off overrides
+ * (overrideTitle, overrideAt). When nothing is left to remember, the row is
+ * removed to stay computed-only. Returns the resulting state, or null if the
+ * Schedule is not visible.
  */
 export async function setOccurrenceState(
   db: Db,
   userId: string,
   scheduleId: string,
   occurrenceAt: string,
-  state: { completed?: boolean; skipped?: boolean },
+  state: OccurrenceState,
 ): Promise<ComputedOccurrence | null> {
   const schedule = await getVisibleSchedule(db, userId, scheduleId);
   if (!schedule) return null;
@@ -177,9 +207,20 @@ export async function setOccurrenceState(
 
   const completed = state.completed ?? existing?.completed === 1;
   const skipped = state.skipped ?? existing?.skipped === 1;
+  const overrideTitle = resolveOverride(
+    state.overrideTitle,
+    existing?.overrideTitle ?? null,
+  );
+  const overrideAt = resolveOverride(
+    state.overrideAt,
+    existing?.overrideAt ?? null,
+  );
 
-  // No state left to remember -> delete the row (stay computed-only).
-  if (!completed && !skipped && !existing?.overrideTitle) {
+  const hasState =
+    completed || skipped || overrideTitle !== null || overrideAt !== null;
+
+  if (!hasState) {
+    // Nothing to remember -> delete the row (stay computed-only).
     if (existing) {
       await db
         .delete(occurrences)
@@ -189,7 +230,12 @@ export async function setOccurrenceState(
   } else if (existing) {
     await db
       .update(occurrences)
-      .set({ completed: completed ? 1 : 0, skipped: skipped ? 1 : 0 })
+      .set({
+        completed: completed ? 1 : 0,
+        skipped: skipped ? 1 : 0,
+        overrideTitle,
+        overrideAt,
+      })
       .where(eq(occurrences.id, existing.id))
       .run();
   } else {
@@ -201,6 +247,8 @@ export async function setOccurrenceState(
         occurrenceAt,
         completed: completed ? 1 : 0,
         skipped: skipped ? 1 : 0,
+        overrideTitle,
+        overrideAt,
         createdAt: new Date().toISOString(),
       })
       .run();
@@ -209,8 +257,9 @@ export async function setOccurrenceState(
   return {
     scheduleId,
     occurrenceAt,
-    title: existing?.overrideTitle ?? schedule.title,
+    title: overrideTitle ?? schedule.title,
     completed,
     skipped,
+    overrideAt,
   };
 }

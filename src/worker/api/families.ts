@@ -6,6 +6,7 @@ import { AuthorizationError } from "../repo/errors.ts";
 import {
   createFamily,
   listFamiliesForUser,
+  listFamilyMembers,
   leaveFamily,
 } from "../repo/families.ts";
 import { generateInvite, acceptInvite } from "../repo/invites.ts";
@@ -33,6 +34,20 @@ familyRoutes.post("/", async (c) => {
 
   const family = await createFamily(db, user.id, name);
   return c.json(family, 201);
+});
+
+// This Family's Members. Members only (non-members get 403, hiding existence).
+familyRoutes.get("/:id/members", async (c) => {
+  const db = createDb(c.env.DB);
+  const user = c.get("user")!;
+  try {
+    return c.json(await listFamilyMembers(db, user.id, c.req.param("id")));
+  } catch (err) {
+    if (err instanceof AuthorizationError) {
+      return c.json({ error: err.message }, 403);
+    }
+    throw err;
+  }
 });
 
 // Generate (or regenerate) this Family's invite. Members only.

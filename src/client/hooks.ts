@@ -12,6 +12,7 @@ import {
   type Family,
   type Due,
   type Occurrence,
+  type OccurrenceState,
 } from "./api.ts";
 
 // Current User. 401 (not logged in) is a normal state, not an error to retry.
@@ -39,6 +40,14 @@ export function useCreateList() {
 
 export function useFamilies() {
   return useQuery({ queryKey: ["families"], queryFn: api.families.list });
+}
+
+export function useFamilyMembers(familyId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ["familyMembers", familyId],
+    queryFn: () => api.families.members(familyId!),
+    enabled: !!familyId && enabled,
+  });
 }
 
 export function useCreateFamily() {
@@ -208,10 +217,8 @@ export function useScheduleNextOccurrences(scheduleIds: string[]) {
 export function useSetOccurrence(scheduleId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: {
-      occurrenceAt: string;
-      state: { completed?: boolean; skipped?: boolean };
-    }) => api.schedules.setOccurrence(scheduleId, args.occurrenceAt, args.state),
+    mutationFn: (args: { occurrenceAt: string; state: OccurrenceState }) =>
+      api.schedules.setOccurrence(scheduleId, args.occurrenceAt, args.state),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: ["occurrences", scheduleId] }),
   });

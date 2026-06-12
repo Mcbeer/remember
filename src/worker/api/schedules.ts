@@ -8,6 +8,7 @@ import {
   deleteSchedule,
   listOccurrences,
   setOccurrenceState,
+  type OccurrenceState,
 } from "../repo/schedules.ts";
 
 type Ctx = { Bindings: Env; Variables: AuthVariables };
@@ -88,7 +89,9 @@ occurrenceRoutes.get("/:scheduleId/occurrences", async (c) => {
   return c.json(occ);
 });
 
-// Set state for one occurrence. Body: { occurrenceAt, completed?, skipped? }.
+// Set state for one occurrence. Body: { occurrenceAt, completed?, skipped?,
+// overrideTitle?, overrideAt? }. overrideTitle/overrideAt are tri-state: omit to
+// leave unchanged, null/"" to clear back to the Schedule default.
 occurrenceRoutes.post("/:scheduleId/occurrences", async (c) => {
   const db = createDb(c.env.DB);
   const user = c.get("user")!;
@@ -96,6 +99,8 @@ occurrenceRoutes.post("/:scheduleId/occurrences", async (c) => {
     occurrenceAt?: unknown;
     completed?: unknown;
     skipped?: unknown;
+    overrideTitle?: unknown;
+    overrideAt?: unknown;
   }>();
 
   const occurrenceAt =
@@ -104,9 +109,21 @@ occurrenceRoutes.post("/:scheduleId/occurrences", async (c) => {
     return c.json({ error: "occurrenceAt is required" }, 400);
   }
 
-  const state: { completed?: boolean; skipped?: boolean } = {};
+  const state: OccurrenceState = {};
   if (typeof body.completed === "boolean") state.completed = body.completed;
   if (typeof body.skipped === "boolean") state.skipped = body.skipped;
+  if (typeof body.overrideTitle === "string" || body.overrideTitle === null) {
+    state.overrideTitle = body.overrideTitle;
+  }
+  if (typeof body.overrideAt === "string" || body.overrideAt === null) {
+    // A non-empty overrideAt must be a valid instant.
+    if (typeof body.overrideAt === "string" && body.overrideAt.trim() !== "") {
+      if (Number.isNaN(Date.parse(body.overrideAt))) {
+        return c.json({ error: "overrideAt must be an ISO-8601 instant" }, 400);
+      }
+    }
+    state.overrideAt = body.overrideAt;
+  }
 
   const result = await setOccurrenceState(
     db,

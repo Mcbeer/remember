@@ -1,9 +1,21 @@
 import { and, eq, sql } from "drizzle-orm";
-import { families, memberships } from "../db/schema.ts";
+import { families, memberships, users } from "../db/schema.ts";
 import type { Db } from "../db/index.ts";
 import { uuidv7 } from "../db/id.ts";
+import { isFamilyMember } from "./visibility.ts";
+import { AuthorizationError } from "./errors.ts";
 
 export type Family = typeof families.$inferSelect;
+
+// A Member of a Family, as exposed for the member-list UI. The Membership
+// joined to its User; we surface only the User fields needed to display them.
+export type FamilyMember = {
+  userId: string;
+  name: string | null;
+  email: string;
+  avatarUrl: string | null;
+  joinedAt: string;
+};
 
 // Families are flat — all Memberships are equal (ADR-0002). Every function is
 // scoped by the caller's Membership; there are no roles to check.
@@ -43,6 +55,35 @@ export function listFamiliesForUser(
     .from(families)
     .innerJoin(memberships, eq(memberships.familyId, families.id))
     .where(eq(memberships.userId, userId))
+    .all();
+}
+
+/**
+ * The Members of a Family, oldest Membership first. Only a Member may view the
+ * roster; a non-member is rejected with an AuthorizationError (we never confirm
+ * the Family exists to outsiders, mirroring the visibility spine, ADR-0002).
+ */
+export async function listFamilyMembers(
+  db: Db,
+  userId: string,
+  familyId: string,
+): Promise<FamilyMember[]> {
+  if (!(await isFamilyMember(db, userId, familyId))) {
+    throw new AuthorizationError("Not a member of this Family");
+  }
+
+  return db
+    .select({
+      userId: users.id,
+      name: users.name,
+      email: users.email,
+      avatarUrl: users.avatarUrl,
+      joinedAt: memberships.createdAt,
+    })
+    .from(memberships)
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .where(eq(memberships.familyId, familyId))
+    .orderBy(memberships.createdAt)
     .all();
 }
 
