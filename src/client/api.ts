@@ -94,6 +94,10 @@ export type Reminder = {
   createdAt: string;
 };
 
+// A List's inbound email address for Email Ingestion (ADR-0005). `address` is
+// null until one is minted.
+export type InboxAddress = { address: string | null; secret?: string };
+
 class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -194,6 +198,32 @@ export const api = {
     remove: (listId: string, itemId: string) =>
       request<void>(`/api/lists/${listId}/items/${itemId}`, {
         method: "DELETE",
+      }),
+  },
+
+  // Email Ingestion (ADR-0005): a List's inbound address, plus the review queue
+  // of suggested (pending) Items and the confirm/reject actions on them.
+  ingestion: {
+    inboxAddress: (listId: string) =>
+      request<InboxAddress>(`/api/lists/${listId}/inbox-address`),
+    generateInboxAddress: (listId: string) =>
+      request<InboxAddress>(`/api/lists/${listId}/inbox-address`, {
+        method: "POST",
+      }),
+    pending: (listId: string) =>
+      request<Item[]>(`/api/lists/${listId}/pending`),
+    confirm: (
+      listId: string,
+      itemId: string,
+      edits?: { title?: string; due?: Due | null },
+    ) =>
+      request<Item>(`/api/lists/${listId}/pending/${itemId}/confirm`, {
+        method: "POST",
+        body: JSON.stringify(edits ?? {}),
+      }),
+    reject: (listId: string, itemId: string) =>
+      request<void>(`/api/lists/${listId}/pending/${itemId}/reject`, {
+        method: "POST",
       }),
   },
 

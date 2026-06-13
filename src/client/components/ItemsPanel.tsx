@@ -31,6 +31,7 @@ import { Checkbox } from "@/components/ui/checkbox.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { cn } from "@/lib/utils.ts";
 import { ItemReminders, ScheduleReminders } from "./Reminders.tsx";
+import { PendingReview, InboxAddressButton } from "./PendingReview.tsx";
 
 export function ItemsPanel({
   listId,
@@ -94,7 +95,14 @@ export function ItemsPanel({
 
   return (
     <div className="mx-auto max-w-2xl p-4 sm:p-6">
-      <h2 className="mb-4 text-xl font-semibold tracking-tight">{listName}</h2>
+      <div className="mb-4 flex items-center gap-2">
+        <h2 className="flex-1 text-xl font-semibold tracking-tight">
+          {listName}
+        </h2>
+        <InboxAddressButton listId={listId} />
+      </div>
+
+      <PendingReview listId={listId} />
 
       <AddEntryForm listId={listId} />
 

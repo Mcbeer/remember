@@ -8,7 +8,10 @@ import { familyRoutes, inviteRoutes } from "./api/families.ts";
 import { scheduleRoutes, occurrenceRoutes } from "./api/schedules.ts";
 import { reminderRoutes } from "./api/reminders.ts";
 import { pushRoutes } from "./api/push.ts";
+import { ingestionRoutes } from "./api/ingestion.ts";
 import { runReminderTick } from "./push/scheduler.ts";
+import { createAiExtractor } from "./ingestion/extract.ts";
+import { ingestEmail, parseIncoming } from "./ingestion/email.ts";
 import {
   authMiddleware,
   requireUser,
@@ -34,6 +37,7 @@ app.get("/api/health", async (c) => {
 
 app.route("/api/auth", authRoutes);
 app.route("/api/lists", listRoutes);
+app.route("/api/lists", ingestionRoutes);
 app.route("/api/lists/:listId/items", itemRoutes);
 app.route("/api/lists/:listId/schedules", scheduleRoutes);
 app.route("/api/schedules", occurrenceRoutes);
@@ -56,9 +60,11 @@ app.get("/api/me", requireUser, (c) => {
 // Anything not matched by the API falls through to the static SPA assets.
 app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 
-// The fetch handler is the Hono app; the scheduled handler is the reminder cron
-// (configured as a Cron Trigger in wrangler.jsonc). Every tick finds Reminders
-// whose fire moment has arrived and sends Web Push to each recipient's devices.
+// fetch = the Hono app; scheduled = the reminder cron (Cron Trigger in
+// wrangler.jsonc); email = inbound Email Ingestion (Email Routing → here). Every
+// scheduled tick finds Reminders whose fire moment arrived and sends Web Push.
+// Every email is routed to a List by its recipient secret, scanned by Workers AI
+// into suggested Items, and written as pending for a Member to confirm (ADR-0005).
 export default {
   fetch: app.fetch,
   async scheduled(_controller, env, ctx) {
@@ -71,6 +77,25 @@ export default {
       }).then(({ sent, pruned }) => {
         console.log(`reminder tick: sent=${sent} pruned=${pruned}`);
       }),
+    );
+  },
+  async email(message, env, _ctx) {
+    const db = createDb(env.DB);
+    // postal-mime parses the full MIME message (multipart, base64/QP encodings)
+    // straight from the raw stream into a plain-text body.
+    const email = await parseIncoming(message.raw, new Date());
+    const extractor = createAiExtractor(env.AI);
+
+    const result = await ingestEmail(db, extractor, message.to, email);
+    if (result.status === "unknown_address") {
+      // No List owns this address; reject so the sender isn't silently dropped.
+      message.setReject("Unknown address");
+      console.log(`email ingest: rejected unknown address ${message.to}`);
+      return;
+    }
+    console.log(
+      `email ingest: ${result.status} list=${result.listId}` +
+        (result.status === "ingested" ? ` count=${result.count}` : ""),
     );
   },
 } satisfies ExportedHandler<Env>;

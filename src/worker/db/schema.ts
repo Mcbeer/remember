@@ -170,6 +170,30 @@ export const items = sqliteTable(
   ],
 );
 
+// An InboxAddress: a unique secret inbound email address for a List (ADR-0005).
+// The `secret` is the local-part of an address (e.g. `groceries-a8f3` in
+// `groceries-a8f3@inbox.example.com`); it both routes an inbound email to this
+// List and acts as the capability to write to it (possession = authorisation).
+// At most one live address per List (UNIQUE list_id); regenerating replaces the
+// row so the old address stops working. Items created this way enter as
+// origin='ingested', status='pending' for a Member to confirm.
+export const inboxAddresses = sqliteTable(
+  "inbox_addresses",
+  {
+    id: text("id").primaryKey(),
+    listId: text("list_id")
+      .notNull()
+      .unique()
+      .references(() => lists.id, { onDelete: "cascade" }),
+    secret: text("secret").notNull().unique(),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [index("idx_inbox_addresses_secret").on(t.secret)],
+);
+
 // A Schedule: a recurrence rule belonging to a List (ADR-0004). Never completed;
 // generates Occurrences. rrule = iCalendar RRULE; dtstart = UTC anchor instant.
 export const schedules = sqliteTable(

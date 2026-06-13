@@ -14,6 +14,7 @@ import {
   type Occurrence,
   type OccurrenceState,
   type Reminder,
+  type InboxAddress,
 } from "./api.ts";
 
 // Current User. 401 (not logged in) is a normal state, not an error to retry.
@@ -225,6 +226,58 @@ export function useSetOccurrence(scheduleId: string) {
   });
 }
 
+// --- Email Ingestion ------------------------------------------------------
+
+// Suggested (pending) Items in a List, awaiting review (ADR-0005).
+export function usePendingItems(listId: string | null) {
+  return useQuery({
+    queryKey: ["pending", listId],
+    queryFn: () => api.ingestion.pending(listId!),
+    enabled: !!listId,
+  });
+}
+
+export function useConfirmPendingItem(listId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      itemId: string;
+      edits?: { title?: string; due?: Due | null };
+    }) => api.ingestion.confirm(listId, args.itemId, args.edits),
+    onSuccess: () => {
+      // The item leaves the review queue and joins the real list.
+      qc.invalidateQueries({ queryKey: ["pending", listId] });
+      qc.invalidateQueries({ queryKey: ["items", listId] });
+    },
+  });
+}
+
+export function useRejectPendingItem(listId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (itemId: string) => api.ingestion.reject(listId, itemId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pending", listId] }),
+  });
+}
+
+// A List's inbound address (null until minted).
+export function useInboxAddress(listId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ["inboxAddress", listId],
+    queryFn: () => api.ingestion.inboxAddress(listId!),
+    enabled: !!listId && enabled,
+  });
+}
+
+export function useGenerateInboxAddress(listId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.ingestion.generateInboxAddress(listId),
+    onSuccess: (data) =>
+      qc.setQueryData<InboxAddress>(["inboxAddress", listId], data),
+  });
+}
+
 // --- Reminders ------------------------------------------------------------
 
 export function useItemReminders(listId: string, itemId: string) {
@@ -276,4 +329,4 @@ export function useRemoveReminder(
   });
 }
 
-export type { Item, List, Family, Reminder };
+export type { Item, List, Family, Reminder, InboxAddress };

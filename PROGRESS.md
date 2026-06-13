@@ -17,8 +17,8 @@ see `CONTEXT.md`; for the decisions and their rationale see `docs/adr/`.
   Cloudflare zone; DNS + TLS auto-provisioned via the `routes` custom-domain
   binding in `wrangler.jsonc`).
 - **D1**: database `remember` (id `92f094d4-…`), region **WEUR**. Migrations
-  applied with `db:migrate:remote`. All 12 tables present (incl.
-  `push_subscriptions`, `reminders`).
+  applied with `db:migrate:remote`. All 13 tables present (incl.
+  `push_subscriptions`, `reminders`, `inbox_addresses`).
 - **Secrets** (6, set via `wrangler secret bulk`): `GOOGLE_CLIENT_ID/SECRET`,
   `GOOGLE_REDIRECT_URI` (= `https://remember.hornskov.dev/api/auth/google/callback`),
   `VAPID_PUBLIC_KEY/PRIVATE_KEY`, `VAPID_SUBJECT` (`mailto:nicolai.h.n@gmail.com`).
@@ -95,21 +95,24 @@ src/worker/
     visibility.ts       # THE spine: visibleListPredicate + isFamilyMember
     errors.ts, lists.ts, items.ts, families.ts, invites.ts
     schedules.ts, occurrence-expansion.ts
-    reminders.ts, push-subscriptions.ts
+    reminders.ts, push-subscriptions.ts, inbox-addresses.ts
   push/                 # Web Push: web-push.ts (VAPID+aes128gcm), base64url.ts,
                         # scheduler.ts (collectDueReminders + runReminderTick)
+  ingestion/            # Email Ingestion: extract.ts (Workers AI ItemExtractor +
+                        # parseExtraction), email.ts (parse + route + ingestEmail)
   api/                  # thin Hono routers over repos (lists, items, families,
-                        # schedules, reminders, push)
+                        # schedules, reminders, push, ingestion)
 src/client/
   api.ts, hooks.ts, datetime.ts, recurrence.ts, push.ts
   App.tsx, main.tsx, styles.css
   components/           # Login, Home, Sidebar, FamilySection, ItemsPanel,
-                        # Reminders, PushPrompt, Join
+                        # Reminders, PushPrompt, Join, PendingReview
 public/                 # sw.js (push + notificationclick), manifest.webmanifest,
                         # icon-192/512.png, badge-96.png
 test/                   # visibility, auth, families, schedules, api, reminders,
-                        # web-push (100 tests across 7 files)
-migrations/             # 0000_core_schema, 0001_add_sessions, 0002 (push+reminders)
+                        # web-push, ingestion (123 tests across 8 files)
+migrations/             # 0000_core_schema, 0001_add_sessions, 0002 (push+reminders),
+                        # 0003 (inbox_addresses)
 docs/adr/               # 0001–0010 (0010 = reminders/web-push)
 ```
 
@@ -176,17 +179,38 @@ docs/adr/               # 0001–0010 (0010 = reminders/web-push)
     fan-out, per-device subscriptions, and the dependency-free WebCrypto push.
   - **Open follow-ups**: tz-aware Schedule recurrence still uses the absolute UTC
     instant (see tech debt); no per-Member mute of a shared Reminder.
+- **Email Ingestion** (ADR-0005). Inbound email → Workers AI → suggested
+  (pending) Items, confirmed by a Member before they count.
+  - **Inbound address**: per-List secret (`inbox_addresses`, one per List,
+    `UNIQUE(list_id)`; regenerate replaces — mirrors the Invite pattern). The
+    full address is `${secret}@${INBOX_DOMAIN}`; possession IS the authorisation.
+  - **Email Worker**: `email()` in `index.ts` resolves the List by the recipient
+    local-part (`resolveListBySecret`, unscoped), parses Subject + body, and runs
+    a swappable `ItemExtractor` (`@cf/meta/llama-3.1-8b-instruct`). `parseExtraction`
+    defensively pulls the JSON array out of any prose/fences and drops malformed
+    entries, so a bad model reply yields zero suggestions, not a 500. Unknown
+    addresses are `setReject`-ed.
+  - **Pending split**: ingested Items are `origin='ingested'`/`status='pending'`/
+    `created_by=null`; `listItems` returns only active rows, `listPendingItems`
+    the review queue. Confirm promotes to active (with optional inline edits);
+    reject deletes the pending row. All member-scoped via the visibility spine.
+  - **API**: `GET/POST /api/lists/:id/inbox-address`, `GET /api/lists/:id/pending`,
+    `POST .../pending/:itemId/{confirm,reject}`.
+  - **UX (mobile-first)**: a "N suggested items from email" banner at the top of
+    a List opens into stacked cards — large full-width Approve/Reject buttons,
+    tap-to-edit-before-approve; a mail-icon popover discloses/mints the List's
+    inbound address (copy + regenerate). `PendingReview.tsx`.
+  - **Bindings/config**: `AI` binding + `INBOX_DOMAIN` var in `wrangler.jsonc`.
+    Operational TODO (dashboard): point Email Routing for `INBOX_DOMAIN` (or a
+    catch-all) at this Worker's `email()` handler.
+  - **Scope**: Items only (no recurrence/Schedule ingestion yet — see ADR-0005).
 
 ## Not yet built (backlog, roughly prioritized)
 
-1. **Email Ingestion** (ADR-0005). Inbound email → Workers AI → suggested
-   (pending) Items. Needs: per-List/Family unique inbound address column, Email
-   Routing + Email Worker, LLM extraction, pending-item confirm UI. Item already
-   has `origin`/`status` columns reserved.
-2. **Real-time updates** (deferred). DO-per-Family fronting WebSockets; could
+1. **Real-time updates** (deferred). DO-per-Family fronting WebSockets; could
    also host reminder alarms for to-the-second firing (vs the current
    minute-granularity Cron). D1 schema unaffected.
-3. **PWA installability** (CONTEXT: installable shell, online data). The
+2. **PWA installability** (CONTEXT: installable shell, online data). The
    `manifest.webmanifest`, icons, and a registered `public/sw.js` are now in
    place, so the install criteria are largely met; remaining work is verifying
    the install prompt across browsers (notably iOS, which needs install before

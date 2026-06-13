@@ -18,6 +18,18 @@
   "triggers": {
     "crons": ["* * * * *"]
   },
+  // Workers AI: the on-platform LLM that extracts suggested Items from inbound
+  // email (Email Ingestion, ADR-0005).
+  "ai": {
+    "binding": "AI"
+  },
+  // The domain part of every List's inbound address (`${secret}@${INBOX_DOMAIN}`).
+  // Email Routing is enabled on the apex `hornskov.dev` zone with a catch-all
+  // rule delivering to this Worker's email() handler, so addresses live on the
+  // apex directly (e.g. `groceries-a8f3@hornskov.dev`).
+  "vars": {
+    "INBOX_DOMAIN": "hornskov.dev"
+  },
   "assets": {
     "directory": "./dist/client",
     "binding": "ASSETS",

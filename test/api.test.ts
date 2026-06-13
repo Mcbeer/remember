@@ -55,6 +55,7 @@ beforeEach(async () => {
   await db.delete(schema.occurrences).run();
   await db.delete(schema.schedules).run();
   await db.delete(schema.items).run();
+  await db.delete(schema.inboxAddresses).run();
   await db.delete(schema.lists).run();
   await db.delete(schema.invites).run();
   await db.delete(schema.memberships).run();
@@ -814,5 +815,143 @@ describe("Push API", () => {
       body: JSON.stringify({ endpoint: "https://push.example/abc" }),
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("Email Ingestion endpoints (ADR-0005)", () => {
+  it("mints an inbox address, returns it, and 404s a non-member", async () => {
+    const alice = await makeUser();
+    const bob = await makeUser();
+    const list = await createList(db, alice, {
+      name: "Groceries",
+      owner: { type: "personal" },
+    });
+
+    // Before minting: address is null.
+    const before = await req(
+      `/api/lists/${list.id}/inbox-address`,
+      await login(alice),
+    );
+    expect(before.status).toBe(200);
+    expect((await before.json()).address).toBeNull();
+
+    // Mint it.
+    const mint = await req(
+      `/api/lists/${list.id}/inbox-address`,
+      await login(alice),
+      { method: "POST" },
+    );
+    expect(mint.status).toBe(201);
+    const body = (await mint.json()) as { address: string };
+    expect(body.address).toContain("@");
+
+    // Now the GET reflects it.
+    const after = await req(
+      `/api/lists/${list.id}/inbox-address`,
+      await login(alice),
+    );
+    expect((await after.json()).address).toBe(body.address);
+
+    // An outsider cannot mint (List not visible -> 404).
+    const outsider = await req(
+      `/api/lists/${list.id}/inbox-address`,
+      await login(bob),
+      { method: "POST" },
+    );
+    expect(outsider.status).toBe(404);
+  });
+
+  it("lists, confirms, and rejects pending Items", async () => {
+    const alice = await makeUser();
+    const list = await createList(db, alice, {
+      name: "L",
+      owner: { type: "personal" },
+    });
+
+    // Seed two ingested (pending) Items directly.
+    await createItem(db, alice, list.id, {
+      title: "Suggested A",
+      origin: "ingested",
+      status: "pending",
+    });
+    const b = await createItem(db, alice, list.id, {
+      title: "Suggested B",
+      origin: "ingested",
+      status: "pending",
+    });
+
+    // They surface under /pending, not under the active /items list.
+    const pending = await req(
+      `/api/lists/${list.id}/pending`,
+      await login(alice),
+    );
+    expect(pending.status).toBe(200);
+    expect(((await pending.json()) as unknown[]).length).toBe(2);
+
+    const active = await req(`/api/lists/${list.id}/items`, await login(alice));
+    expect(((await active.json()) as unknown[]).length).toBe(0);
+
+    // Confirm B with an edited title.
+    const confirm = await req(
+      `/api/lists/${list.id}/pending/${b.id}/confirm`,
+      await login(alice),
+      { method: "POST", body: JSON.stringify({ title: "Real B" }) },
+    );
+    expect(confirm.status).toBe(200);
+    expect((await confirm.json()).status).toBe("active");
+
+    const activeAfter = await req(
+      `/api/lists/${list.id}/items`,
+      await login(alice),
+    );
+    expect(((await activeAfter.json()) as { title: string }[]).map((i) => i.title)).toEqual([
+      "Real B",
+    ]);
+
+    // One pending left; reject it.
+    const stillPending = (await (
+      await req(`/api/lists/${list.id}/pending`, await login(alice))
+    ).json()) as { id: string }[];
+    expect(stillPending).toHaveLength(1);
+
+    const reject = await req(
+      `/api/lists/${list.id}/pending/${stillPending[0].id}/reject`,
+      await login(alice),
+      { method: "POST" },
+    );
+    expect(reject.status).toBe(204);
+    expect(
+      ((await (
+        await req(`/api/lists/${list.id}/pending`, await login(alice))
+      ).json()) as unknown[]).length,
+    ).toBe(0);
+  });
+
+  it("404s confirm/reject for an outsider (hides existence)", async () => {
+    const alice = await makeUser();
+    const bob = await makeUser();
+    const list = await createList(db, alice, {
+      name: "L",
+      owner: { type: "personal" },
+    });
+    const p = await createItem(db, alice, list.id, {
+      title: "Secret",
+      origin: "ingested",
+      status: "pending",
+    });
+
+    const confirm = await req(
+      `/api/lists/${list.id}/pending/${p.id}/confirm`,
+      await login(bob),
+      { method: "POST" },
+    );
+    expect(confirm.status).toBe(404);
+
+    const reject = await req(
+      `/api/lists/${list.id}/pending/${p.id}/reject`,
+      await login(bob),
+      { method: "POST" },
+    );
+    expect(reject.status).toBe(404);
   });
 });
