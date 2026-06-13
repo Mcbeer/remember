@@ -200,23 +200,44 @@ docs/adr/               # 0001–0010 (0010 = reminders/web-push)
     a List opens into stacked cards — large full-width Approve/Reject buttons,
     tap-to-edit-before-approve; a mail-icon popover discloses/mints the List's
     inbound address (copy + regenerate). `PendingReview.tsx`.
-  - **Bindings/config**: `AI` binding + `INBOX_DOMAIN` var in `wrangler.jsonc`.
-    Operational TODO (dashboard): point Email Routing for `INBOX_DOMAIN` (or a
-    catch-all) at this Worker's `email()` handler.
-  - **Scope**: Items only (no recurrence/Schedule ingestion yet — see ADR-0005).
+  - **Parsing/model**: `postal-mime` parses the raw MIME (multipart, base64/QP)
+    into plain text; model is `@cf/meta/llama-3.3-70b-instruct-fp8-fast`
+    (the older 3.1-8b was deprecated, AiError 5028). `parseExtraction` accepts the
+    Workers AI `response` whether it's a JSON string or an already-parsed array.
+  - **Bindings/config**: `AI` binding + `INBOX_DOMAIN="hornskov.dev"` in
+    `wrangler.jsonc`. Email Routing on the `hornskov.dev` zone uses a **catch-all
+    → Worker** rule (dashboard-only; the CLI can't point a catch-all at a Worker).
+  - **LIVE & verified end-to-end** (2026-06): a Danish school email
+    (`Sophia skal læse side 15 og 16…`) routed → parsed → extracted → landed as a
+    pending Item (`email ingest: ingested count=1`).
+  - **Scope**: Items only (no recurrence/Schedule ingestion — deliberate, ADR-0005;
+    intended use is forwarding school mail to surface actionable Items).
 
 ## Not yet built (backlog, roughly prioritized)
 
-1. **Real-time updates** (deferred). DO-per-Family fronting WebSockets; could
+1. **Ingestion Log / inbox inspection** (ADR-0011). A short-lived (~24h, swept by
+   the existing cron) per-List record of inbound emails — parsed subject/sender/
+   body + extraction outcome — with a "Recent emails" view so a Member can read a
+   message even when the AI created nothing. Solves the Gmail auto-forward
+   confirmation-code problem (the code arrives, AI says "no action", but you can
+   still read it) and doubles as a sanity check / audit trail. Parsed text only,
+   no raw MIME/attachments. Schema/repo/API/UI sketch in ADR-0011.
+2. **Real-time updates** (deferred). DO-per-Family fronting WebSockets; could
    also host reminder alarms for to-the-second firing (vs the current
    minute-granularity Cron). D1 schema unaffected.
-2. **PWA installability** (CONTEXT: installable shell, online data). The
+3. **PWA installability** (CONTEXT: installable shell, online data). The
    `manifest.webmanifest`, icons, and a registered `public/sw.js` are now in
    place, so the install criteria are largely met; remaining work is verifying
    the install prompt across browsers (notably iOS, which needs install before
    Web Push works) and any maskable-icon polish. No offline data sync in v1. A
    light theme is also deferred — when added, give it a `.light` block + wire
    `prefers-color-scheme`/a toggle (ADR-0009).
+4. **Scope an inbound-mail routing rule** (optional). Email Routing currently
+   uses a catch-all → Worker on `hornskov.dev`, so *all* mail to the zone hits
+   ingestion (unknown local-parts are `setReject`-ed). Fine while the zone isn't
+   used for personal mail; if it is, replace the catch-all with a custom rule
+   matching the inbox-address pattern. Easy change in the dashboard / via the
+   Email Routing API.
 
 ## Known gaps / tech debt
 
