@@ -1,12 +1,13 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import app from "../src/worker/index.ts";
+import { app } from "../src/worker/index.ts";
 import { createDb, schema } from "../src/worker/db/index.ts";
 import { uuidv7 } from "../src/worker/db/id.ts";
 import { createFamily } from "../src/worker/repo/families.ts";
 import { generateInvite, acceptInvite } from "../src/worker/repo/invites.ts";
 import { createList } from "../src/worker/repo/lists.ts";
 import { createSchedule } from "../src/worker/repo/schedules.ts";
+import { createItem } from "../src/worker/repo/items.ts";
 import {
   generateSessionToken,
   createSession,
@@ -49,6 +50,8 @@ function req(path: string, cookie?: string, init?: RequestInit) {
 }
 
 beforeEach(async () => {
+  await db.delete(schema.reminders).run();
+  await db.delete(schema.pushSubscriptions).run();
   await db.delete(schema.occurrences).run();
   await db.delete(schema.schedules).run();
   await db.delete(schema.items).run();
@@ -708,5 +711,108 @@ describe("POST /api/invites/:secret/accept", () => {
       { method: "POST" },
     );
     expect(res.status).toBe(410);
+  });
+});
+
+describe("Reminders API", () => {
+  it("adds a reminder to a visible Item (201) and lists it", async () => {
+    const alice = await makeUser();
+    const list = await createList(db, alice, {
+      name: "Mine",
+      owner: { type: "personal" },
+    });
+    const item = await createItem(db, alice, list.id, {
+      title: "Pay rent",
+      due: { at: "2026-06-10T09:00:00.000Z", timezone: "UTC" },
+    });
+    const cookie = await login(alice);
+
+    const add = await req(
+      `/api/lists/${list.id}/items/${item!.id}/reminders`,
+      cookie,
+      { method: "POST", body: JSON.stringify({ offsetMinutes: 30 }) },
+    );
+    expect(add.status).toBe(201);
+
+    const get = await req(
+      `/api/lists/${list.id}/items/${item!.id}/reminders`,
+      cookie,
+    );
+    expect(get.status).toBe(200);
+    expect(((await get.json()) as unknown[]).length).toBe(1);
+  });
+
+  it("rejects a negative offset with 400", async () => {
+    const alice = await makeUser();
+    const list = await createList(db, alice, {
+      name: "Mine",
+      owner: { type: "personal" },
+    });
+    const item = await createItem(db, alice, list.id, { title: "X" });
+    const res = await req(
+      `/api/lists/${list.id}/items/${item!.id}/reminders`,
+      await login(alice),
+      { method: "POST", body: JSON.stringify({ offsetMinutes: -5 }) },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("404s adding a reminder to an Item in a List you cannot see", async () => {
+    const alice = await makeUser();
+    const bob = await makeUser();
+    const list = await createList(db, alice, {
+      name: "Mine",
+      owner: { type: "personal" },
+    });
+    const item = await createItem(db, alice, list.id, { title: "Secret" });
+    const res = await req(
+      `/api/lists/${list.id}/items/${item!.id}/reminders`,
+      await login(bob),
+      { method: "POST", body: JSON.stringify({ offsetMinutes: 10 }) },
+    );
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("Push API", () => {
+  it("exposes the VAPID public key without auth", async () => {
+    const res = await req("/api/push/key");
+    expect(res.status).toBe(200);
+    expect(typeof (await res.json()).publicKey).toBe("string");
+  });
+
+  it("requires auth to subscribe", async () => {
+    const res = await req("/api/push/subscribe", undefined, {
+      method: "POST",
+      body: JSON.stringify({
+        endpoint: "https://push.example/x",
+        keys: { p256dh: "a", auth: "b" },
+      }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("registers a device subscription (201)", async () => {
+    const alice = await makeUser();
+    const res = await req("/api/push/subscribe", await login(alice), {
+      method: "POST",
+      body: JSON.stringify({
+        endpoint: "https://push.example/abc",
+        keys: { p256dh: "pub", auth: "secret" },
+      }),
+    });
+    expect(res.status).toBe(201);
+    expect(await db.select().from(schema.pushSubscriptions).all()).toHaveLength(
+      1,
+    );
+  });
+
+  it("rejects an incomplete subscription with 400", async () => {
+    const alice = await makeUser();
+    const res = await req("/api/push/subscribe", await login(alice), {
+      method: "POST",
+      body: JSON.stringify({ endpoint: "https://push.example/abc" }),
+    });
+    expect(res.status).toBe(400);
   });
 });

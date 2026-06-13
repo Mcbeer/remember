@@ -15,6 +15,13 @@
       "when": 1780855957505,
       "tag": "0001_add_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1781291121624,
+      "tag": "0002_dashing_dagger",
+      "breakpoints": true
     }
   ]
 }

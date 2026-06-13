@@ -82,6 +82,18 @@ export type OccurrenceState = {
   overrideAt?: string | null;
 };
 
+// A Reminder: a Web Push fired offsetMinutes before an Item's due time or a
+// Schedule's next Occurrence. Shared like its anchor.
+export type Reminder = {
+  id: string;
+  itemId: string | null;
+  scheduleId: string | null;
+  offsetMinutes: number;
+  lastSentAt: string | null;
+  createdBy: string | null;
+  createdAt: string;
+};
+
 class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -210,6 +222,42 @@ export const api = {
       request<Occurrence>(`/api/schedules/${scheduleId}/occurrences`, {
         method: "POST",
         body: JSON.stringify({ occurrenceAt, ...state }),
+      }),
+  },
+
+  reminders: {
+    forItem: (listId: string, itemId: string) =>
+      request<Reminder[]>(`/api/lists/${listId}/items/${itemId}/reminders`),
+    addToItem: (listId: string, itemId: string, offsetMinutes: number) =>
+      request<Reminder>(`/api/lists/${listId}/items/${itemId}/reminders`, {
+        method: "POST",
+        body: JSON.stringify({ offsetMinutes }),
+      }),
+    forSchedule: (listId: string, scheduleId: string) =>
+      request<Reminder[]>(
+        `/api/lists/${listId}/schedules/${scheduleId}/reminders`,
+      ),
+    addToSchedule: (listId: string, scheduleId: string, offsetMinutes: number) =>
+      request<Reminder>(
+        `/api/lists/${listId}/schedules/${scheduleId}/reminders`,
+        { method: "POST", body: JSON.stringify({ offsetMinutes }) },
+      ),
+    remove: (reminderId: string) =>
+      request<void>(`/api/reminders/${reminderId}`, { method: "DELETE" }),
+  },
+
+  push: {
+    // The VAPID public key the browser needs to subscribe (open endpoint).
+    key: () => request<{ publicKey: string }>("/api/push/key"),
+    subscribe: (sub: PushSubscriptionJSON) =>
+      request<{ id: string }>("/api/push/subscribe", {
+        method: "POST",
+        body: JSON.stringify(sub),
+      }),
+    unsubscribe: (endpoint: string) =>
+      request<void>("/api/push/subscribe", {
+        method: "DELETE",
+        body: JSON.stringify({ endpoint }),
       }),
   },
 };

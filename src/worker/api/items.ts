@@ -9,6 +9,7 @@ import {
   updateItem,
   deleteItem,
 } from "../repo/items.ts";
+import { listReminders, createReminder } from "../repo/reminders.ts";
 
 type Ctx = { Bindings: Env; Variables: AuthVariables };
 
@@ -120,4 +121,36 @@ itemRoutes.delete("/:itemId", async (c) => {
   const ok = await deleteItem(db, user.id, c.req.param("itemId"));
   if (!ok) return c.json({ error: "Not found" }, 404);
   return c.body(null, 204);
+});
+
+// Reminders on an Item (shared like the Item). Fire offsetMinutes before dueAt.
+itemRoutes.get("/:itemId/reminders", async (c) => {
+  const db = createDb(c.env.DB);
+  const user = c.get("user")!;
+  return c.json(
+    await listReminders(db, user.id, {
+      type: "item",
+      itemId: c.req.param("itemId"),
+    }),
+  );
+});
+
+itemRoutes.post("/:itemId/reminders", async (c) => {
+  const db = createDb(c.env.DB);
+  const user = c.get("user")!;
+  const body = await c.req.json<{ offsetMinutes?: unknown }>();
+  const offsetMinutes =
+    typeof body.offsetMinutes === "number" ? body.offsetMinutes : NaN;
+  if (!Number.isInteger(offsetMinutes) || offsetMinutes < 0) {
+    return c.json({ error: "offsetMinutes must be a non-negative integer" }, 400);
+  }
+
+  const reminder = await createReminder(
+    db,
+    user.id,
+    { type: "item", itemId: c.req.param("itemId") },
+    offsetMinutes,
+  );
+  if (!reminder) return c.json({ error: "Not found" }, 404);
+  return c.json(reminder, 201);
 });

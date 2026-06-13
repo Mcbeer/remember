@@ -11,6 +11,28 @@ see `CONTEXT.md`; for the decisions and their rationale see `docs/adr/`.
 - D1 (SQLite) via Drizzle ORM. UUIDv7 text primary keys.
 - Roll-your-own auth: `arctic` (Google OAuth) + `@oslojs/crypto`. Sessions in D1.
 
+## Production (LIVE)
+
+- **URL**: https://remember.hornskov.dev (custom domain on the `hornskov.dev`
+  Cloudflare zone; DNS + TLS auto-provisioned via the `routes` custom-domain
+  binding in `wrangler.jsonc`).
+- **D1**: database `remember` (id `92f094d4-…`), region **WEUR**. Migrations
+  applied with `db:migrate:remote`. All 12 tables present (incl.
+  `push_subscriptions`, `reminders`).
+- **Secrets** (6, set via `wrangler secret bulk`): `GOOGLE_CLIENT_ID/SECRET`,
+  `GOOGLE_REDIRECT_URI` (= `https://remember.hornskov.dev/api/auth/google/callback`),
+  `VAPID_PUBLIC_KEY/PRIVATE_KEY`, `VAPID_SUBJECT` (`mailto:nicolai.h.n@gmail.com`).
+- **Cron trigger** `* * * * *` is attached (reminder scheduler). Note:
+  Cloudflare refuses to attach cron triggers until the account has a
+  **workers.dev subdomain** — open Workers & Pages in the dashboard once to
+  create it (this blocked the first deploy with API error 10063).
+- **Google OAuth** stays in **Testing mode**: only emails added under OAuth
+  consent screen → Test users can log in. Add each family member there.
+- **Verified working end-to-end** (2026-06): Google login, push subscribe, and a
+  reminder firing to **both** of a User's devices (`reminder tick: sent=2`),
+  confirming per-device subscriptions + whole-Family fan-out (ADR-0010).
+- **Redeploy**: `npm run deploy`. Schema changes also need `db:migrate:remote`.
+
 ## Commands
 
 ```
@@ -34,7 +56,28 @@ Test tooling is pinned: `@cloudflare/vitest-pool-workers@0.8.71` + `vitest@~3.2`
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=http://localhost:5173/api/auth/google/callback
+VAPID_PUBLIC_KEY=...      # base64url uncompressed P-256 point (also client appServerKey)
+VAPID_PRIVATE_KEY=...     # base64url PKCS8 private key
+VAPID_SUBJECT=mailto:...  # contact URI sent in the VAPID JWT
 ```
+
+### VAPID keys (Web Push)
+
+A P-256 keypair authenticates us to push services (RFC 8292). Generate once with
+Node's WebCrypto and keep the private key secret:
+
+```
+node --input-type=module -e '
+const b64u=(u8)=>Buffer.from(u8).toString("base64").replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+const kp=await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign","verify"]);
+console.log("VAPID_PUBLIC_KEY="+b64u(new Uint8Array(await crypto.subtle.exportKey("raw",kp.publicKey))));
+console.log("VAPID_PRIVATE_KEY="+b64u(new Uint8Array(await crypto.subtle.exportKey("pkcs8",kp.privateKey))));
+'
+```
+
+A dev keypair already lives in `.dev.vars`. In production set all three with
+`wrangler secret put VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT`.
+The client fetches the public key from `GET /api/push/key`.
 
 GCP setup: APIs & Services → OAuth consent screen (External, Testing mode, add
 yourself as a Test user; scopes openid/email/profile need no verification) →
@@ -45,21 +88,29 @@ byte-match `GOOGLE_REDIRECT_URI`. `localhost` over http is allowed by Google.
 
 ```
 src/worker/
-  index.ts              # Hono app, route mounting, ASSETS fallthrough
+  index.ts              # Hono app (named export `app`) + default { fetch, scheduled }
   db/{schema,index,id}.ts
   auth/{session,users,google,cookies,middleware,routes}.ts
   repo/                 # the scoped data layer (every fn takes userId first)
     visibility.ts       # THE spine: visibleListPredicate + isFamilyMember
     errors.ts, lists.ts, items.ts, families.ts, invites.ts
     schedules.ts, occurrence-expansion.ts
-  api/                  # thin Hono routers over repos (lists, items, families, schedules)
+    reminders.ts, push-subscriptions.ts
+  push/                 # Web Push: web-push.ts (VAPID+aes128gcm), base64url.ts,
+                        # scheduler.ts (collectDueReminders + runReminderTick)
+  api/                  # thin Hono routers over repos (lists, items, families,
+                        # schedules, reminders, push)
 src/client/
-  api.ts, hooks.ts, datetime.ts, recurrence.ts
+  api.ts, hooks.ts, datetime.ts, recurrence.ts, push.ts
   App.tsx, main.tsx, styles.css
   components/           # Login, Home, Sidebar, FamilySection, ItemsPanel,
-                        # SchedulesSection, ScheduleOccurrences, Join
-  test/                   # visibility, auth, families, schedules, api (82 tests)
-migrations/             # 0000_core_schema, 0001_add_sessions
+                        # Reminders, PushPrompt, Join
+public/                 # sw.js (push + notificationclick), manifest.webmanifest,
+                        # icon-192/512.png, badge-96.png
+test/                   # visibility, auth, families, schedules, api, reminders,
+                        # web-push (100 tests across 7 files)
+migrations/             # 0000_core_schema, 0001_add_sessions, 0002 (push+reminders)
+docs/adr/               # 0001–0010 (0010 = reminders/web-push)
 ```
 
 ## Implemented
@@ -100,32 +151,47 @@ migrations/             # 0000_core_schema, 0001_add_sessions
   (dark slate in `:root`, no toggle, light deferred). Responsive: sidebar
   collapses to a Sheet drawer on mobile. Due dates set via a calendar-icon
   button that opens the native picker (`showPicker()`), no manual typing.
+- **Reminders / Web Push** (CONTEXT "Reminder"). A **Reminder** is shared like
+  the thing it attaches to: any Member can add one (offset before due) to an
+  **Item** (its `dueAt`) or a **Schedule** (its next Occurrence); exactly one
+  anchor (schema CHECK). When it fires, recipients are the List's owning **User**
+  or **all Members** of the owning **Family**, pushed on every device.
+  - **Subscriptions** are per-device (`push_subscriptions`: user + endpoint +
+    p256dh/auth; unique endpoint upserts). Registered on "Enable" via the
+    `PushPrompt` banner; pruned automatically on 404/410 from the push service.
+  - **Scheduler** is a Cron Trigger (`* * * * *` → `scheduled()` →
+    `runReminderTick`). `collectDueReminders` is the pure decision step (fully
+    unit-tested); it fires once per due moment via `reminders.lastSentAt` (= the
+    dueAt/occurrence instant), with a 1h catch-up window for missed ticks.
+  - **Web Push** is dependency-free WebCrypto in `src/worker/push/web-push.ts`:
+    VAPID ES256 JWT (RFC 8292) + aes128gcm payload encryption (RFC 8291). The
+    encrypt/decrypt roundtrip was verified against a simulated UA keypair.
+  - **Client**: `public/sw.js` shows the notification + focuses/opens the app on
+    tap; `src/client/push.ts` does permission + subscribe; bell buttons on each
+    Item/Schedule row open a reminder dialog (preset offsets).
+  - **Icons/manifest**: `public/{icon-192,icon-512,badge-96}.png` (bell, themed
+    dark-slate/emerald) + `public/manifest.webmanifest`, linked from
+    `index.html`. The notification uses `icon-192` + `badge-96`.
+  - **Decision record**: ADR-0010 captures the Cron-vs-DO scheduler, all-Members
+    fan-out, per-device subscriptions, and the dependency-free WebCrypto push.
+  - **Open follow-ups**: tz-aware Schedule recurrence still uses the absolute UTC
+    instant (see tech debt); no per-Member mute of a shared Reminder.
 
 ## Not yet built (backlog, roughly prioritized)
 
-1. **Reminders / Web Push** (ADR future; CONTEXT "Reminder"). Anchor points now
-   exist (Item.dueAt, Schedule occurrences). Needs:
-   - push subscription storage (new table: user/device endpoint + keys, p256dh/auth)
-   - a `reminders` concept attached to an Item or Schedule (offset before due)
-   - a scheduled trigger (Cron Trigger or DO alarm) to compute due reminders and
-     send Web Push; VAPID keys as secrets
-   - frontend: permission prompt + service worker push handler + reminder UI
-   - **decisions still open**: per-device vs per-user subscriptions; where the
-     scheduler lives (Cron vs DO alarm — DO also enables real-time later).
-2. **Email Ingestion** (ADR-0005). Inbound email → Workers AI → suggested
+1. **Email Ingestion** (ADR-0005). Inbound email → Workers AI → suggested
    (pending) Items. Needs: per-List/Family unique inbound address column, Email
    Routing + Email Worker, LLM extraction, pending-item confirm UI. Item already
    has `origin`/`status` columns reserved.
-3. **Deploy to production**. `wrangler d1 create remember` → set real
-   `database_id` in wrangler.jsonc → `db:migrate:remote` → `wrangler secret put`
-   the 3 GOOGLE_* values → add prod redirect URI in GCP → publish consent screen
-   → `npm run deploy`.
-4. **Real-time updates** (deferred). DO-per-Family fronting WebSockets; would
-   also host reminder alarms. D1 schema unaffected.
-5. **PWA installability** (CONTEXT: installable shell, online data). Manifest +
-   service worker for install; no offline data sync in v1. The dark-first UI
-   (ADR-0009) is now in place, so this is the natural next step. A light theme
-   is also deferred — when added, give it a `.light` block + wire
+2. **Real-time updates** (deferred). DO-per-Family fronting WebSockets; could
+   also host reminder alarms for to-the-second firing (vs the current
+   minute-granularity Cron). D1 schema unaffected.
+3. **PWA installability** (CONTEXT: installable shell, online data). The
+   `manifest.webmanifest`, icons, and a registered `public/sw.js` are now in
+   place, so the install criteria are largely met; remaining work is verifying
+   the install prompt across browsers (notably iOS, which needs install before
+   Web Push works) and any maskable-icon polish. No offline data sync in v1. A
+   light theme is also deferred — when added, give it a `.light` block + wire
    `prefers-color-scheme`/a toggle (ADR-0009).
 
 ## Known gaps / tech debt
@@ -133,9 +199,20 @@ migrations/             # 0000_core_schema, 0001_add_sessions
 - **API-route tests**: the routers are now covered end-to-end (auth gating,
   status codes, visibility/membership) in `test/api.test.ts` by driving
   `app.request(..., env)` with a real session cookie — families/invites/members,
-  lists, items, and schedules (list/create/delete + occurrence one-off edits).
-  Still untested: the `returnTo`/login-resume flow and the OAuth callback leg
-  (both manual).
+  lists, items, schedules (list/create/delete + occurrence one-off edits), plus
+  reminders (add/list/validation/visibility) and push (key/subscribe/auth).
+  `test/reminders.test.ts` covers the reminders repo and `collectDueReminders`
+  (Item + Schedule firing, no-double-send, Family fan-out). `test/web-push.test.ts`
+  runs the aes128gcm encryption roundtrip on **workerd** (same engine as prod).
+  Still untested in CI: the `returnTo`/login-resume flow, the OAuth callback leg,
+  and the `runReminderTick` fetch leg (verified live in prod instead —
+  `reminder tick: sent=2` to two devices).
+- **WebCrypto types lie about ECDH** (caught in prod, 2026-06): the generated
+  `worker-configuration.d.ts` types the ECDH `deriveBits` param as `$public`, but
+  the workerd runtime requires the standard `public` — using `$public` throws
+  `Missing field "public" in "derivedKeyParams"` at send time. `web-push.ts` uses
+  `public` with a cast; `test/web-push.test.ts` guards the regression. Lesson:
+  trust the runtime over the local types, and test crypto on workerd not Node.
 - **Occurrence window**: server defaults to next 60 days; UI shows only the
   next 1 (per recurring entry). No past-occurrence view or pagination.
 - **Timezone in recurrence**: Schedule stores an IANA tz but expansion uses the
@@ -145,5 +222,5 @@ migrations/             # 0000_core_schema, 0001_add_sessions
   `dist/` is gitignored so no leak, but never deploy `dist/` contents directly.
 - **Git**: under version control on `main`, pushed to public remote
   `git@github.com:Mcbeer/remember.git`. Repo is public — keep secrets out
-  (`.dev.vars` is gitignored).
-```
+  (`.dev.vars` is gitignored, and is also copied into `dist/` — never commit
+  `dist/`).

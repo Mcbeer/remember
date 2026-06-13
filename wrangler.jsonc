@@ -3,8 +3,20 @@
   "name": "remember",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-06-07",
+  // Serve production on the custom domain (Cloudflare provisions the DNS record
+  // and TLS cert for this hostname on the hornskov.dev zone).
+  "routes": [
+    {
+      "pattern": "remember.hornskov.dev",
+      "custom_domain": true
+    }
+  ],
   "observability": {
     "enabled": true
+  },
+  // Reminder scheduler: every minute, find due Reminders and send Web Push.
+  "triggers": {
+    "crons": ["* * * * *"]
   },
   "assets": {
     "directory": "./dist/client",
@@ -16,7 +28,7 @@
     {
       "binding": "DB",
       "database_name": "remember",
-      "database_id": "placeholder-set-via-wrangler-d1-create",
+      "database_id": "92f094d4-2ab2-44f1-a25c-1c575113eb77",
       "migrations_dir": "migrations"
     }
   ]

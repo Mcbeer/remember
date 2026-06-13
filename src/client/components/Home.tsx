@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/sheet.tsx";
 import { Sidebar } from "./Sidebar.tsx";
 import { ItemsPanel } from "./ItemsPanel.tsx";
+import { PushPrompt } from "./PushPrompt.tsx";
 
 export function Home({ me }: { me: Me }) {
   const lists = useLists();
@@ -68,6 +69,8 @@ export function Home({ me }: { me: Me }) {
           </Button>
         </div>
       </header>
+
+      <PushPrompt />
 
       <div className="flex min-h-0 flex-1">
         {/* Persistent sidebar on md+ */}

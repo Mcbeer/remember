@@ -3,3 +3,11 @@
 GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
 GOOGLE_CLIENT_SECRET="your-client-secret"
 GOOGLE_REDIRECT_URI="http://localhost:5173/api/auth/google/callback"
+
+# Web Push / Reminders (VAPID). Generate a P-256 keypair (see PROGRESS.md).
+# VAPID_PUBLIC_KEY is the base64url uncompressed point (also used by the client
+# as applicationServerKey). VAPID_PRIVATE_KEY is the base64url PKCS8 private key.
+# VAPID_SUBJECT is a mailto: or https: contact URI sent in the VAPID JWT.
+VAPID_PUBLIC_KEY="your-vapid-public-key"
+VAPID_PRIVATE_KEY="your-vapid-private-key"
+VAPID_SUBJECT="mailto:you@example.com"

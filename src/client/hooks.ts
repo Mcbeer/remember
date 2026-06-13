@@ -13,6 +13,7 @@ import {
   type Due,
   type Occurrence,
   type OccurrenceState,
+  type Reminder,
 } from "./api.ts";
 
 // Current User. 401 (not logged in) is a normal state, not an error to retry.
@@ -224,4 +225,55 @@ export function useSetOccurrence(scheduleId: string) {
   });
 }
 
-export type { Item, List, Family };
+// --- Reminders ------------------------------------------------------------
+
+export function useItemReminders(listId: string, itemId: string) {
+  return useQuery({
+    queryKey: ["reminders", "item", itemId],
+    queryFn: () => api.reminders.forItem(listId, itemId),
+  });
+}
+
+export function useAddItemReminder(listId: string, itemId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (offsetMinutes: number) =>
+      api.reminders.addToItem(listId, itemId, offsetMinutes),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["reminders", "item", itemId] }),
+  });
+}
+
+export function useScheduleReminders(listId: string, scheduleId: string) {
+  return useQuery({
+    queryKey: ["reminders", "schedule", scheduleId],
+    queryFn: () => api.reminders.forSchedule(listId, scheduleId),
+  });
+}
+
+export function useAddScheduleReminder(listId: string, scheduleId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (offsetMinutes: number) =>
+      api.reminders.addToSchedule(listId, scheduleId, offsetMinutes),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["reminders", "schedule", scheduleId] }),
+  });
+}
+
+// Removing a Reminder needs to invalidate whichever anchor list it belonged to;
+// the caller passes the anchor key so we can target the right query.
+export function useRemoveReminder(
+  anchor: { type: "item" | "schedule"; id: string },
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (reminderId: string) => api.reminders.remove(reminderId),
+    onSuccess: () =>
+      qc.invalidateQueries({
+        queryKey: ["reminders", anchor.type, anchor.id],
+      }),
+  });
+}
+
+export type { Item, List, Family, Reminder };

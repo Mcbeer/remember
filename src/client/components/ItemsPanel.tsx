@@ -30,6 +30,7 @@ import { Input } from "@/components/ui/input.tsx";
 import { Checkbox } from "@/components/ui/checkbox.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { cn } from "@/lib/utils.ts";
+import { ItemReminders, ScheduleReminders } from "./Reminders.tsx";
 
 export function ItemsPanel({
   listId,
@@ -415,6 +416,11 @@ function ScheduleRow({
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
+        <ScheduleReminders
+          listId={listId}
+          scheduleId={schedule.id}
+          title={schedule.title}
+        />
         {next && (
           <>
             <Button
@@ -613,6 +619,7 @@ function ItemRow({
         )}
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
+        <ItemReminders listId={listId} itemId={item.id} title={item.title} />
         <Button
           variant="ghost"
           size="icon-sm"

@@ -214,3 +214,57 @@ export const occurrences = sqliteTable(
     check("ck_occurrences_skipped_bool", sql`${t.skipped} IN (0, 1)`),
   ],
 );
+
+// A push subscription: one browser/device endpoint a User has granted Web Push
+// to (per-device, not per-user). The Web Push spec gives us an endpoint URL plus
+// two keys (p256dh, auth) that we encrypt payloads against. A User with a phone
+// and a laptop has two rows; both get pushed. Deleting the row stops delivery to
+// that device. `endpoint` is unique so re-subscribing the same device upserts.
+export const pushSubscriptions = sqliteTable(
+  "push_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull().unique(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [index("idx_push_subscriptions_user").on(t.userId)],
+);
+
+// A Reminder: a Web Push fired `offsetMinutes` before a due moment — either an
+// Item's due time or a Schedule's next Occurrence (CONTEXT "Reminder"). A
+// Reminder is shared like the thing it attaches to: any Member can add one to a
+// shared Item/Schedule, and when it fires every recipient (the owning User, or
+// all Members of the owning Family) is pushed on all their devices. Exactly one
+// of itemId / scheduleId is set (CHECK). `lastSentAt` is the occurrence instant
+// we most recently fired for, so the cron scheduler never double-sends and a
+// Schedule's reminder advances occurrence to occurrence.
+export const reminders = sqliteTable(
+  "reminders",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id").references(() => items.id, { onDelete: "cascade" }),
+    scheduleId: text("schedule_id").references(() => schedules.id, {
+      onDelete: "cascade",
+    }),
+    offsetMinutes: integer("offset_minutes").notNull(),
+    lastSentAt: text("last_sent_at"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    index("idx_reminders_item").on(t.itemId),
+    index("idx_reminders_schedule").on(t.scheduleId),
+    check(
+      "ck_reminders_exactly_one_anchor",
+      sql`(${t.itemId} IS NOT NULL AND ${t.scheduleId} IS NULL) OR (${t.itemId} IS NULL AND ${t.scheduleId} IS NOT NULL)`,
+    ),
+    check("ck_reminders_offset_nonneg", sql`${t.offsetMinutes} >= 0`),
+  ],
+);

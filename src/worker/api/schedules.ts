@@ -10,6 +10,7 @@ import {
   setOccurrenceState,
   type OccurrenceState,
 } from "../repo/schedules.ts";
+import { listReminders, createReminder } from "../repo/reminders.ts";
 
 type Ctx = { Bindings: Env; Variables: AuthVariables };
 
@@ -134,6 +135,39 @@ occurrenceRoutes.post("/:scheduleId/occurrences", async (c) => {
   );
   if (result === null) return c.json({ error: "Not found" }, 404);
   return c.json(result);
+});
+
+// Reminders on a Schedule (shared like the Schedule). Fire offsetMinutes before
+// the Schedule's next Occurrence instant.
+scheduleRoutes.get("/:scheduleId/reminders", async (c) => {
+  const db = createDb(c.env.DB);
+  const user = c.get("user")!;
+  return c.json(
+    await listReminders(db, user.id, {
+      type: "schedule",
+      scheduleId: c.req.param("scheduleId"),
+    }),
+  );
+});
+
+scheduleRoutes.post("/:scheduleId/reminders", async (c) => {
+  const db = createDb(c.env.DB);
+  const user = c.get("user")!;
+  const body = await c.req.json<{ offsetMinutes?: unknown }>();
+  const offsetMinutes =
+    typeof body.offsetMinutes === "number" ? body.offsetMinutes : NaN;
+  if (!Number.isInteger(offsetMinutes) || offsetMinutes < 0) {
+    return c.json({ error: "offsetMinutes must be a non-negative integer" }, 400);
+  }
+
+  const reminder = await createReminder(
+    db,
+    user.id,
+    { type: "schedule", scheduleId: c.req.param("scheduleId") },
+    offsetMinutes,
+  );
+  if (!reminder) return c.json({ error: "Not found" }, 404);
+  return c.json(reminder, 201);
 });
 
 scheduleRoutes.delete("/:scheduleId", async (c) => {
